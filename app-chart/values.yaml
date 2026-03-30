@@ -1,0 +1,51 @@
+namespace: app-dev
+
+podReady:
+  enabled: true
+  name: pod-ready
+  image: nginx:alpine
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      cpu: 50m
+      memory: 64Mi
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  livenessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 15
+
+podPending:
+  enabled: true
+  name: pod-pending
+  image: this-image-does-not-exist:fake-tag
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      cpu: 50m
+      memory: 64Mi
+
+podCrash:
+  enabled: true
+  name: pod-ready-then-crash
+  image: alpine:latest
+  normalRunSeconds: 10
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      cpu: 100m
+      memory: 32Mi
+  readinessProbe:
+    initialDelaySeconds: 3
+    periodSeconds: 5
+    failureThreshold: 3
+  livenessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 10

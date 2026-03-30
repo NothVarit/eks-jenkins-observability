@@ -1,0 +1,37 @@
+{{- if .Values.podReady.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Values.podReady.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: sample-app
+    state: ready
+    chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+spec:
+  containers:
+  - name: app
+    image: {{ .Values.podReady.image }}
+    imagePullPolicy: IfNotPresent
+    ports:
+    - containerPort: 80
+    readinessProbe:
+      httpGet:
+        path: /
+        port: 80
+      initialDelaySeconds: {{ .Values.podReady.readinessProbe.initialDelaySeconds }}
+      periodSeconds: {{ .Values.podReady.readinessProbe.periodSeconds }}
+    livenessProbe:
+      httpGet:
+        path: /
+        port: 80
+      initialDelaySeconds: {{ .Values.podReady.livenessProbe.initialDelaySeconds }}
+      periodSeconds: {{ .Values.podReady.livenessProbe.periodSeconds }}
+    resources:
+      requests:
+        cpu: {{ .Values.podReady.resources.requests.cpu }}
+        memory: {{ .Values.podReady.resources.requests.memory }}
+      limits:
+        cpu: {{ .Values.podReady.resources.limits.cpu }}
+        memory: {{ .Values.podReady.resources.limits.memory }}
+{{- end }}

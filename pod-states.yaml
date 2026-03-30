@@ -1,0 +1,140 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-ready
+  namespace: app-dev
+  labels:
+    app: sample-app
+    state: ready
+spec:
+  containers:
+  - name: app
+    image: nginx:alpine
+    ports:
+    - containerPort: 80
+    readinessProbe:
+      httpGet:
+        path: /
+        port: 80
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    livenessProbe:
+      httpGet:
+        path: /
+        port: 80
+      initialDelaySeconds: 10
+      periodSeconds: 15
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        cpu: 50m
+        memory: 64Mi
+
+---
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-pending
+  namespace: app-dev
+  labels:
+    app: sample-app
+    state: pending
+spec:
+  containers:
+  - name: app
+    image: this-image-does-not-exist:fake-tag
+    ports:
+    - containerPort: 80
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        cpu: 50m
+        memory: 64Mi
+
+---
+
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: pod-crashloop
+#   namespace: app-dev
+#   labels:
+#     app: sample-app
+#     state: crashloop
+# spec:
+#   restartPolicy: Always
+#   containers:
+#   - name: app
+#     image: busybox:latest
+#     command: ["sh", "-c", "echo 'crashing...' && exit 1"]
+#     resources:
+#       requests:
+#         cpu: 10m
+#         memory: 16Mi
+#       limits:
+#         cpu: 50m
+#         memory: 64Mi
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-ready-then-crash
+  namespace: app-dev
+  labels:
+    app: sample-app
+    state: ready-then-crash
+spec:
+  restartPolicy: Always
+  containers:
+  - name: app
+    image: alpine:latest
+    command:
+    - sh
+    - -c
+    - |
+      echo "[1] Pod starting..."
+
+      # รอให้ container init เสร็จ
+      sleep 5
+
+      # บอก readinessProbe ว่าพร้อมแล้ว
+      touch /tmp/ready
+      echo "[2] Pod is READY - normal operation running..."
+
+      # simulate ช่วง normal running ก่อนโหลดหนัก
+      sleep 10
+      echo "[3] Heavy load arriving - allocating memory..."
+
+      # จำลองโหลดหนัก: allocate memory จนเกิน limit → OOMKilled
+      # limit คือ 32Mi → dd สร้างไฟล์ 500MB → kernel kill process
+      dd if=/dev/zero of=/tmp/load bs=1M count=500
+
+      # ไม่มีทางถึงบรรทัดนี้
+      sleep 9999
+
+    readinessProbe:
+      # ผ่านเมื่อ /tmp/ready ถูกสร้าง (หลัง 5 วิ)
+      exec:
+        command: ["test", "-f", "/tmp/ready"]
+      initialDelaySeconds: 3
+      periodSeconds: 5
+      failureThreshold: 3
+
+    livenessProbe:
+      exec:
+        command: ["test", "-f", "/tmp/ready"]
+      initialDelaySeconds: 10
+      periodSeconds: 10
+
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        cpu: 100m
+        memory: 32Mi    # ตั้งต่ำมาก → dd จะทำให้ OOMKilled แน่นอน

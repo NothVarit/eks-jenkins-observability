@@ -1,0 +1,117 @@
+{{- if .Values.kubeMetrics.enabled }}
+# ── kube-state-metrics RBAC ───────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.kubeMetrics.serviceAccount }}
+  namespace: {{ .Values.namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-state-metrics-role
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - nodes
+      - namespaces
+      - services
+      - endpoints
+      - persistentvolumeclaims
+      - replicationcontrollers
+      - limitranges
+      - resourcequotas
+      - secrets
+      - configmaps
+    verbs: ["list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    verbs: ["list", "watch"]
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: ["list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kube-state-metrics-binding
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.kubeMetrics.serviceAccount }}
+    namespace: {{ .Values.namespace }}
+roleRef:
+  kind: ClusterRole
+  name: kube-state-metrics-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# ── kube-state-metrics Deployment ────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-state-metrics
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-state-metrics
+  template:
+    metadata:
+      labels:
+        app: kube-state-metrics
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "{{ .Values.kubeMetrics.port }}"
+        prometheus.io/path:   "/metrics"
+    spec:
+      serviceAccountName: {{ .Values.kubeMetrics.serviceAccount }}
+      containers:
+        - name: kube-state-metrics
+          image: {{ .Values.kubeMetrics.image }}
+          imagePullPolicy: {{ .Values.kubeMetrics.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.kubeMetrics.port }}
+              name: http-metrics
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.kubeMetrics.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: {{ .Values.kubeMetrics.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: {{ .Values.kubeMetrics.resources.requests.cpu }}
+              memory: {{ .Values.kubeMetrics.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.kubeMetrics.resources.limits.cpu }}
+              memory: {{ .Values.kubeMetrics.resources.limits.memory }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-state-metrics
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: kube-state-metrics
+  ports:
+    - port: {{ .Values.kubeMetrics.port }}
+      targetPort: {{ .Values.kubeMetrics.port }}
+{{- end }}

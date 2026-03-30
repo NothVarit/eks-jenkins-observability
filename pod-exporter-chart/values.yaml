@@ -1,0 +1,76 @@
+namespace: monitoring
+
+# ── Custom Pod Exporter ───────────────────────────────────────────────
+customExporter:
+  enabled: true
+  image: 510485988616.dkr.ecr.ap-southeast-1.amazonaws.com/pod-exporter:latest
+  imagePullPolicy: Always
+  port: 8000
+  serviceAccount: pod-exporter-sa
+  env:
+    KUBE_METRICS_URL: "http://kube-metrics-exporter-svc.monitoring.svc.cluster.local:8080/metrics"
+  resources:
+    requests:
+      cpu: 30m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+  livenessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+  readinessProbe:
+    initialDelaySeconds: 3
+    periodSeconds: 5
+    timeoutSeconds: 5
+
+# ── kube-state-metrics ────────────────────────────────────────────────
+kubeMetrics:
+  enabled: true
+  image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0
+  imagePullPolicy: Always           # pull แล้ว — ใช้ local
+  port: 8080
+  serviceAccount: kube-metrics-monitor
+  resources:
+    requests:
+      cpu: 30m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+# ── Prometheus ────────────────────────────────────────────────────────
+prometheus:
+  enabled: true
+  image: prom/prometheus:latest
+  imagePullPolicy: IfNotPresent
+  port: 9090
+  retention: 15d
+  scrapeInterval: 15s
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── Grafana ───────────────────────────────────────────────────────────
+grafana:
+  enabled: true
+  image: grafana/grafana:latest
+  imagePullPolicy: IfNotPresent
+  port: 3000
+  adminPassword: admin123
+  nodePort: 30300
+  prometheusUid: PBFA97CFB590B2093
+  service:
+    type: LoadBalancer
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi

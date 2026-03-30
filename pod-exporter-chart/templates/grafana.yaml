@@ -1,0 +1,85 @@
+{{- if .Values.grafana.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: {{ .Values.namespace }}
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+    - name: Prometheus
+      type: prometheus
+      url: http://prometheus-svc.{{ .Values.namespace }}.svc.cluster.local:{{ .Values.prometheus.port }}
+      access: proxy
+      isDefault: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/grafana-provision.yaml") . | sha256sum }}
+    spec:
+      containers:
+      - name: grafana
+        image: {{ .Values.grafana.image }}
+        imagePullPolicy: {{ .Values.grafana.imagePullPolicy }}
+        ports:
+        - containerPort: {{ .Values.grafana.port }}
+        env:
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          value: "{{ .Values.grafana.adminPassword }}"
+        volumeMounts:
+        - name: datasources
+          mountPath: /etc/grafana/provisioning/datasources
+        - name: dashboard-provider
+          mountPath: /etc/grafana/provisioning/dashboards/provider.yaml
+          subPath: provider.yaml
+        - name: dashboard-json
+          mountPath: /var/lib/grafana/dashboards/pod-observability.json
+          subPath: pod-observability.json
+        - name: dashboard-json
+          mountPath: /var/lib/grafana/dashboards/kube-state-metrics.json
+          subPath: kube-state-metrics.json
+        resources:
+          requests:
+            cpu: {{ .Values.grafana.resources.requests.cpu }}
+            memory: {{ .Values.grafana.resources.requests.memory }}
+          limits:
+            cpu: {{ .Values.grafana.resources.limits.cpu }}
+            memory: {{ .Values.grafana.resources.limits.memory }}
+      volumes:
+      - name: datasources
+        configMap:
+          name: grafana-datasources
+      - name: dashboard-provider
+        configMap:
+          name: grafana-dashboard-provider
+      - name: dashboard-json
+        configMap:
+          name: grafana-dashboards
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-svc
+  namespace: {{ .Values.namespace }}
+spec:
+  type: LoadBalancer
+  selector:
+    app: grafana
+  ports:
+  - port: {{ .Values.grafana.port }}
+    targetPort: {{ .Values.grafana.port }}
+{{- end }}

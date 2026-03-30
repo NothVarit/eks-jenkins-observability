@@ -1,0 +1,47 @@
+{{- if .Values.podCrash.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Values.podCrash.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: sample-app
+    state: ready-then-crash
+    chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+spec:
+  restartPolicy: Always
+  containers:
+  - name: app
+    image: {{ .Values.podCrash.image }}
+    imagePullPolicy: IfNotPresent
+    command:
+    - sh
+    - -c
+    - |
+      echo "[1] Pod starting..."
+      sleep 5
+      touch /tmp/ready
+      echo "[2] Pod is READY - normal operation running..."
+      sleep {{ .Values.podCrash.normalRunSeconds }}
+      echo "[3] Heavy load arriving - allocating memory..."
+      dd if=/dev/zero of=/tmp/load bs=1M count=500
+      sleep 9999
+    readinessProbe:
+      exec:
+        command: ["test", "-f", "/tmp/ready"]
+      initialDelaySeconds: {{ .Values.podCrash.readinessProbe.initialDelaySeconds }}
+      periodSeconds: {{ .Values.podCrash.readinessProbe.periodSeconds }}
+      failureThreshold: {{ .Values.podCrash.readinessProbe.failureThreshold }}
+    livenessProbe:
+      exec:
+        command: ["test", "-f", "/tmp/ready"]
+      initialDelaySeconds: {{ .Values.podCrash.livenessProbe.initialDelaySeconds }}
+      periodSeconds: {{ .Values.podCrash.livenessProbe.periodSeconds }}
+    resources:
+      requests:
+        cpu: {{ .Values.podCrash.resources.requests.cpu }}
+        memory: {{ .Values.podCrash.resources.requests.memory }}
+      limits:
+        cpu: {{ .Values.podCrash.resources.limits.cpu }}
+        memory: {{ .Values.podCrash.resources.limits.memory }}
+{{- end }}

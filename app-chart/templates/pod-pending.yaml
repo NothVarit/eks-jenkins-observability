@@ -1,0 +1,24 @@
+{{- if .Values.podPending.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Values.podPending.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: sample-app
+    state: pending
+    chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+spec:
+  containers:
+  - name: app
+    image: {{ .Values.podPending.image }}
+    ports:
+    - containerPort: 80
+    resources:
+      requests:
+        cpu: {{ .Values.podPending.resources.requests.cpu }}
+        memory: {{ .Values.podPending.resources.requests.memory }}
+      limits:
+        cpu: {{ .Values.podPending.resources.limits.cpu }}
+        memory: {{ .Values.podPending.resources.limits.memory }}
+{{- end }}

@@ -1,0 +1,59 @@
+{{- if .Values.customExporter.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pod-exporter
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pod-exporter
+  template:
+    metadata:
+      labels:
+        app: pod-exporter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "{{ .Values.customExporter.port }}"
+        prometheus.io/path:   "/metrics"
+    spec:
+      serviceAccountName: {{ .Values.customExporter.serviceAccount }}
+      containers:
+        - name: exporter
+          image: {{ .Values.customExporter.image }}
+          imagePullPolicy: {{ .Values.customExporter.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.customExporter.port }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.customExporter.port }}
+            initialDelaySeconds: {{ .Values.customExporter.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.customExporter.livenessProbe.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.customExporter.port }}
+            initialDelaySeconds: {{ .Values.customExporter.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.customExporter.readinessProbe.periodSeconds }}
+          resources:
+            requests:
+              cpu: {{ .Values.customExporter.resources.requests.cpu }}
+              memory: {{ .Values.customExporter.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.customExporter.resources.limits.cpu }}
+              memory: {{ .Values.customExporter.resources.limits.memory }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pod-exporter-svc
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: pod-exporter
+  ports:
+    - port: {{ .Values.customExporter.port }}
+      targetPort: {{ .Values.customExporter.port }}
+{{- end }}

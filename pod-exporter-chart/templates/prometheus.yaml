@@ -1,0 +1,80 @@
+{{- if .Values.prometheus.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: {{ .Values.namespace }}
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: {{ .Values.prometheus.scrapeInterval }}
+
+    scrape_configs:
+      {{- if .Values.customExporter.enabled }}
+      - job_name: 'pod-exporter'
+        static_configs:
+          - targets:
+              - 'pod-exporter-svc.{{ .Values.namespace }}.svc.cluster.local:{{ .Values.customExporter.port }}'
+      {{- end }}
+      {{- if .Values.kubeMetrics.enabled }}
+      - job_name: 'kube-state-metrics'
+        static_configs:
+          - targets:
+              - 'kube-state-metrics.{{ .Values.namespace }}.svc.cluster.local:8080'
+      {{- end }}
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:{{ .Values.prometheus.port }}']
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+      - name: prometheus
+        image: {{ .Values.prometheus.image }}
+        imagePullPolicy: {{ .Values.prometheus.imagePullPolicy }}
+        args:
+          - "--config.file=/etc/prometheus/prometheus.yml"
+          - "--storage.tsdb.retention.time={{ .Values.prometheus.retention }}"
+          - "--web.enable-lifecycle"
+        ports:
+        - containerPort: {{ .Values.prometheus.port }}
+        volumeMounts:
+        - name: config
+          mountPath: /etc/prometheus
+        resources:
+          requests:
+            cpu: {{ .Values.prometheus.resources.requests.cpu }}
+            memory: {{ .Values.prometheus.resources.requests.memory }}
+          limits:
+            cpu: {{ .Values.prometheus.resources.limits.cpu }}
+            memory: {{ .Values.prometheus.resources.limits.memory }}
+      volumes:
+      - name: config
+        configMap:
+          name: prometheus-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-svc
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: prometheus
+  ports:
+  - port: {{ .Values.prometheus.port }}
+    targetPort: {{ .Values.prometheus.port }}
+{{- end }}

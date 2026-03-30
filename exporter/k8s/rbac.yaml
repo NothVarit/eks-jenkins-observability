@@ -1,0 +1,49 @@
+# ── ServiceAccount ───────────────────────────────────────────────────
+# Identity that the exporter pod runs as
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pod-exporter-sa
+  namespace: monitoring
+
+---
+# ── ClusterRole ──────────────────────────────────────────────────────
+# Minimum permissions needed:
+#   - pods        → core metrics (availability, restarts, phase, age)
+#   - nodes.stats → required by metrics-server to serve pod metrics
+#   - pods (metrics.k8s.io) → CPU and memory usage
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pod-exporter-role
+rules:
+  # Core API — read pod info across all namespaces
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+
+  # Core API — read namespace list
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+
+  # Metrics API — read CPU/memory usage per pod
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+
+---
+# ── ClusterRoleBinding ───────────────────────────────────────────────
+# Binds the ServiceAccount to the ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pod-exporter-binding
+subjects:
+  - kind: ServiceAccount
+    name: pod-exporter-sa
+    namespace: monitoring
+roleRef:
+  kind: ClusterRole
+  name: pod-exporter-role
+  apiGroup: rbac.authorization.k8s.io
