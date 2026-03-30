@@ -1,0 +1,183 @@
+pipeline {
+    agent any
+
+    environment {
+        PATH             = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
+
+        // ── AWS ───────────────────────────────────────────────────────────
+        AWS_REGION       = "ap-southeast-1"
+        AWS_ACCOUNT_ID   = "510485988616"
+        ECR_REPO         = "pod-exporter"
+        CLUSTER_NAME     = "observability-cluster"
+
+        // ── Image ─────────────────────────────────────────────────────────
+        IMAGE_NAME       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
+        IMAGE_TAG        = "latest"
+
+        // ── Helm ──────────────────────────────────────────────────────────
+        HELM_RELEASE     = "observability"
+        HELM_CHART       = "/Users/t.varit.srisuphanthong/Documents/mini_project/pod-exporter-chart"
+        APP_CHART        = "/Users/t.varit.srisuphanthong/Documents/mini_project/app-chart"
+        EXPORTER_DIR     = "/Users/t.varit.srisuphanthong/Documents/mini_project/exporter"
+        NAMESPACE        = "monitoring"
+    }
+
+    stages {
+
+        stage('Verify Tools') {
+            steps {
+                sh """
+                    echo "Docker:  \$(docker --version)"
+                    echo "kubectl: \$(kubectl version --client)"
+                    echo "Helm:    \$(helm version --short)"
+                    echo "AWS CLI: \$(aws --version)"
+                """
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh """
+                    cd ${EXPORTER_DIR}
+                    docker buildx build \
+                        --platform linux/amd64 \
+                        -t ${ECR_REPO}:${IMAGE_TAG} \
+                        --load \
+                        .
+                """
+            }
+        }
+
+        stage('Push to ECR') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'aws-access-key-id',     variable: 'AWS_ACCESS_KEY_ID'),
+                    string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                ]) {
+                    sh """
+                        aws ecr get-login-password --region ${AWS_REGION} | \
+                            docker login --username AWS --password-stdin \
+                            ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+
+                        docker tag ${ECR_REPO}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}
+                        docker push ${IMAGE_NAME}:${IMAGE_TAG}
+
+                        echo "Pushed: ${IMAGE_NAME}:${IMAGE_TAG}"
+                    """
+                }
+            }
+        }
+
+        stage('Connect to EKS') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'aws-access-key-id',     variable: 'AWS_ACCESS_KEY_ID'),
+                    string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                ]) {
+                    sh """
+                        aws eks update-kubeconfig \
+                            --name ${CLUSTER_NAME} \
+                            --region ${AWS_REGION}
+
+                        echo "Current context: \$(kubectl config current-context)"
+                        kubectl get nodes
+                    """
+                }
+            }
+        }
+
+        stage('Deploy app-chart') {
+            steps {
+                sh """
+                    if helm status test-app -n app-dev > /dev/null 2>&1; then
+                        helm upgrade test-app ${APP_CHART} --namespace app-dev
+                    else
+                        helm install test-app ${APP_CHART} \
+                            --namespace app-dev \
+                            --create-namespace
+                    fi
+                """
+            }
+        }
+
+        stage('Validate Templates') {
+            steps {
+                sh """
+                    echo "Linting Helm charts..."
+                    helm lint ${HELM_CHART}
+                    helm template observability ${HELM_CHART} \
+                        --namespace ${NAMESPACE} > /dev/null
+                    echo "Templates validated"
+                """
+            }
+        }
+
+        stage('Deploy observability-chart') {
+            steps {
+                sh """
+                    if helm status ${HELM_RELEASE} -n ${NAMESPACE} > /dev/null 2>&1; then
+                        helm upgrade ${HELM_RELEASE} ${HELM_CHART} \
+                            --namespace ${NAMESPACE} \
+                            --wait --timeout 5m
+                    else
+                        helm install ${HELM_RELEASE} ${HELM_CHART} \
+                            --namespace ${NAMESPACE} \
+                            --create-namespace \
+                            --wait --timeout 5m
+                    fi
+                """
+            }
+        }
+
+        stage('Restart Exporter') {
+            steps {
+                sh """
+                    kubectl rollout restart deployment/pod-exporter -n ${NAMESPACE}
+                    kubectl rollout status deployment/pod-exporter -n ${NAMESPACE} --timeout=2m
+                """
+            }
+        }
+
+        stage('Verify') {
+            steps {
+                sh """
+                    echo "=== app-dev ==="
+                    kubectl get pods -n app-dev
+
+                    echo "=== monitoring ==="
+                    kubectl get pods -n ${NAMESPACE}
+                    kubectl rollout status deployment/prometheus -n ${NAMESPACE}
+                    kubectl rollout status deployment/grafana -n ${NAMESPACE}
+                """
+            }
+        }
+
+        stage('Smoke Test') {
+            steps {
+                sh """
+                    sleep 10
+                    kubectl exec -n ${NAMESPACE} deploy/pod-exporter -- \
+                        wget -qO- http://localhost:8000/metrics | grep pod_availability | head -3
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Pipeline succeeded"
+            sh """
+                helm list -A
+                kubectl get pods -n ${NAMESPACE}
+                kubectl get svc -n ${NAMESPACE}
+            """
+        }
+        failure {
+            echo "Pipeline failed"
+            sh """
+                kubectl get pods -n ${NAMESPACE} || true
+                kubectl logs -n ${NAMESPACE} deploy/pod-exporter --tail=20 || true
+            """
+        }
+    }
+}
