@@ -5,25 +5,19 @@ pipeline {
         choice(
             name: 'TERRAFORM_ACTION',
             choices: ['deploy', 'destroy', 'plan-only'],
-            description: 'เลือก action: deploy = apply + helm, destroy = terraform destroy, plan-only = ดูแผนอย่างเดียว'
+            description: 'deploy = apply + helm | destroy = cleanup all | plan-only = dry run'
         )
     }
 
     environment {
         PATH             = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
-
-        // ── AWS ───────────────────────────────────────────────────────────
         AWS_REGION       = "ap-southeast-1"
         AWS_ACCOUNT_ID   = "510485988616"
         ECR_REPO         = "pod-exporter"
         CLUSTER_NAME     = "observability-cluster"
         TERRAFORM_DIR    = "${env.WORKSPACE}/terraform"
-
-        // ── Image ─────────────────────────────────────────────────────────
         IMAGE_NAME       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
         IMAGE_TAG        = "latest"
-
-        // ── Helm ──────────────────────────────────────────────────────────
         HELM_RELEASE     = "observability"
         HELM_CHART       = "${env.WORKSPACE}/pod-exporter-chart"
         APP_CHART        = "${env.WORKSPACE}/app-chart"
@@ -46,30 +40,9 @@ pipeline {
             }
         }
 
-        // ── Terraform Destroy ─────────────────────────────────────────────
-        stage('Terraform Destroy') {
-            when {
-                expression { params.TERRAFORM_ACTION == 'destroy' }
-            }
-            steps {
-                withCredentials([
-                    string(credentialsId: 'aws-access-key-id',     variable: 'AWS_ACCESS_KEY_ID'),
-                    string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
-                ]) {
-                    sh """
-                        cd ${TERRAFORM_DIR}
-                        terraform init
-                        terraform destroy -auto-approve
-                    """
-                }
-            }
-        }
-
-        // ── Terraform Plan only ───────────────────────────────────────────
+        // ── PLAN ONLY ─────────────────────────────────────────────────────
         stage('Terraform Plan') {
-            when {
-                expression { params.TERRAFORM_ACTION == 'plan-only' }
-            }
+            when { expression { params.TERRAFORM_ACTION == 'plan-only' } }
             steps {
                 withCredentials([
                     string(credentialsId: 'aws-access-key-id',     variable: 'AWS_ACCESS_KEY_ID'),
@@ -84,11 +57,48 @@ pipeline {
             }
         }
 
-        // ── Terraform Apply ───────────────────────────────────────────────
-        stage('Terraform Apply') {
-            when {
-                expression { params.TERRAFORM_ACTION == 'deploy' }
+        // ── DESTROY ───────────────────────────────────────────────────────
+        stage('Cleanup Helm') {
+            when { expression { params.TERRAFORM_ACTION == 'destroy' } }
+            steps {
+                withCredentials([
+                    string(credentialsId: 'aws-access-key-id',     variable: 'AWS_ACCESS_KEY_ID'),
+                    string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                ]) {
+                    sh """
+                        aws eks update-kubeconfig \
+                            --name ${CLUSTER_NAME} \
+                            --region ${AWS_REGION} || true
+
+                        helm uninstall ${HELM_RELEASE} -n ${NAMESPACE} || true
+                        helm uninstall test-app -n app-dev || true
+
+                        echo "Waiting 60s for Load Balancer to be deleted..."
+                        sleep 60
+                    """
+                }
             }
+        }
+
+        stage('Terraform Destroy') {
+            when { expression { params.TERRAFORM_ACTION == 'destroy' } }
+            steps {
+                withCredentials([
+                    string(credentialsId: 'aws-access-key-id',     variable: 'AWS_ACCESS_KEY_ID'),
+                    string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                ]) {
+                    sh """
+                        cd ${TERRAFORM_DIR}
+                        terraform init
+                        terraform destroy -auto-approve
+                    """
+                }
+            }
+        }
+
+        // ── DEPLOY ────────────────────────────────────────────────────────
+        stage('Terraform Apply') {
+            when { expression { params.TERRAFORM_ACTION == 'deploy' } }
             steps {
                 withCredentials([
                     string(credentialsId: 'aws-access-key-id',     variable: 'AWS_ACCESS_KEY_ID'),
@@ -104,29 +114,25 @@ pipeline {
             }
         }
 
-        // ── Docker Build ──────────────────────────────────────────────────
         stage('Build Docker Image') {
-            when {
-                expression { params.TERRAFORM_ACTION == 'deploy' }
-            }
+            when { expression { params.TERRAFORM_ACTION == 'deploy' } }
             steps {
-                sh """
-                    cd ${EXPORTER_DIR}
-                    docker buildx build \
-                        --platform linux/amd64 \
-                        -t ${ECR_REPO}:${IMAGE_TAG} \
-                        --load \
-                        .
-                    docker images | grep ${ECR_REPO}
-                """
+                retry(3) {
+                    sh """
+                        cd ${EXPORTER_DIR}
+                        docker buildx build \
+                            --platform linux/amd64 \
+                            -t ${ECR_REPO}:${IMAGE_TAG} \
+                            --load \
+                            .
+                        docker images | grep ${ECR_REPO}
+                    """
+                }
             }
         }
 
-        // ── Push to ECR ───────────────────────────────────────────────────
         stage('Push to ECR') {
-            when {
-                expression { params.TERRAFORM_ACTION == 'deploy' }
-            }
+            when { expression { params.TERRAFORM_ACTION == 'deploy' } }
             steps {
                 withCredentials([
                     string(credentialsId: 'aws-access-key-id',     variable: 'AWS_ACCESS_KEY_ID'),
@@ -145,11 +151,8 @@ pipeline {
             }
         }
 
-        // ── Connect EKS ───────────────────────────────────────────────────
         stage('Connect to EKS') {
-            when {
-                expression { params.TERRAFORM_ACTION == 'deploy' }
-            }
+            when { expression { params.TERRAFORM_ACTION == 'deploy' } }
             steps {
                 withCredentials([
                     string(credentialsId: 'aws-access-key-id',     variable: 'AWS_ACCESS_KEY_ID'),
@@ -159,6 +162,7 @@ pipeline {
                         aws eks update-kubeconfig \
                             --name ${CLUSTER_NAME} \
                             --region ${AWS_REGION}
+
                         echo "Context: \$(kubectl config current-context)"
                         kubectl get nodes
                     """
@@ -166,11 +170,8 @@ pipeline {
             }
         }
 
-        // ── Deploy app-chart ──────────────────────────────────────────────
         stage('Deploy app-chart') {
-            when {
-                expression { params.TERRAFORM_ACTION == 'deploy' }
-            }
+            when { expression { params.TERRAFORM_ACTION == 'deploy' } }
             steps {
                 sh """
                     if helm status test-app -n app-dev > /dev/null 2>&1; then
@@ -183,11 +184,8 @@ pipeline {
             }
         }
 
-        // ── Validate Templates ────────────────────────────────────────────
         stage('Validate Templates') {
-            when {
-                expression { params.TERRAFORM_ACTION == 'deploy' }
-            }
+            when { expression { params.TERRAFORM_ACTION == 'deploy' } }
             steps {
                 sh """
                     helm lint ${HELM_CHART}
@@ -198,11 +196,8 @@ pipeline {
             }
         }
 
-        // ── Deploy observability-chart ────────────────────────────────────
         stage('Deploy observability-chart') {
-            when {
-                expression { params.TERRAFORM_ACTION == 'deploy' }
-            }
+            when { expression { params.TERRAFORM_ACTION == 'deploy' } }
             steps {
                 sh """
                     if helm status ${HELM_RELEASE} -n ${NAMESPACE} > /dev/null 2>&1; then
@@ -217,11 +212,8 @@ pipeline {
             }
         }
 
-        // ── Restart Exporter ──────────────────────────────────────────────
         stage('Restart Exporter') {
-            when {
-                expression { params.TERRAFORM_ACTION == 'deploy' }
-            }
+            when { expression { params.TERRAFORM_ACTION == 'deploy' } }
             steps {
                 sh """
                     kubectl rollout restart deployment/pod-exporter -n ${NAMESPACE}
@@ -230,11 +222,35 @@ pipeline {
             }
         }
 
-        // ── Verify ────────────────────────────────────────────────────────
-        stage('Verify') {
-            when {
-                expression { params.TERRAFORM_ACTION == 'deploy' }
+        stage('Open Security Group') {
+            when { expression { params.TERRAFORM_ACTION == 'deploy' } }
+            steps {
+                withCredentials([
+                    string(credentialsId: 'aws-access-key-id',     variable: 'AWS_ACCESS_KEY_ID'),
+                    string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                ]) {
+                    sh """
+                        SG_ID=\$(aws eks describe-cluster \
+                            --name ${CLUSTER_NAME} \
+                            --region ${AWS_REGION} \
+                            --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' \
+                            --output text)
+
+                        aws ec2 authorize-security-group-ingress \
+                            --group-id \$SG_ID \
+                            --protocol tcp \
+                            --port 3000 \
+                            --cidr 0.0.0.0/0 \
+                            --region ${AWS_REGION} || true
+
+                        echo "Security group \$SG_ID opened port 3000"
+                    """
+                }
             }
+        }
+
+        stage('Verify') {
+            when { expression { params.TERRAFORM_ACTION == 'deploy' } }
             steps {
                 sh """
                     echo "=== app-dev ==="
@@ -249,11 +265,8 @@ pipeline {
             }
         }
 
-        // ── Smoke Test ────────────────────────────────────────────────────
         stage('Smoke Test') {
-            when {
-                expression { params.TERRAFORM_ACTION == 'deploy' }
-            }
+            when { expression { params.TERRAFORM_ACTION == 'deploy' } }
             steps {
                 sh """
                     sleep 10
@@ -270,7 +283,7 @@ pipeline {
             sh "helm list -A || true"
         }
         failure {
-            echo "Pipeline failed"
+            echo "Pipeline failed — action: ${params.TERRAFORM_ACTION}"
             sh """
                 kubectl get pods -n ${NAMESPACE} || true
                 kubectl logs -n ${NAMESPACE} deploy/pod-exporter --tail=20 || true
