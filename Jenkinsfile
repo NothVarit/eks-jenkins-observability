@@ -66,15 +66,39 @@ pipeline {
                     string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
                 ]) {
                     sh """
+                        # update kubeconfig — ถ้า cluster ไม่มีแล้วก็ข้ามไป
                         aws eks update-kubeconfig \
                             --name ${CLUSTER_NAME} \
                             --region ${AWS_REGION} || true
 
+                        # ลบ helm — ถ้า cluster unreachable ก็ข้ามไป
                         helm uninstall ${HELM_RELEASE} -n ${NAMESPACE} || true
                         helm uninstall test-app -n app-dev || true
 
-                        echo "Waiting 60s for Load Balancer to be deleted..."
-                        sleep 60
+                        # ลบ LB ที่ค้างผ่าน AWS CLI ตรงๆ แทน
+                        for lb in \$(aws elb describe-load-balancers \
+                            --region ${AWS_REGION} \
+                            --query 'LoadBalancerDescriptions[*].LoadBalancerName' \
+                            --output text); do
+                            echo "Deleting LB: \$lb"
+                            aws elb delete-load-balancer \
+                                --load-balancer-name \$lb \
+                                --region ${AWS_REGION} || true
+                        done
+
+                        # ลบ sg ที่ค้าง
+                        for sg in \$(aws ec2 describe-security-groups \
+                            --region ${AWS_REGION} \
+                            --query 'SecurityGroups[?starts_with(GroupName, `k8s-elb`)].GroupId' \
+                            --output text); do
+                            echo "Deleting SG: \$sg"
+                            aws ec2 delete-security-group \
+                                --group-id \$sg \
+                                --region ${AWS_REGION} || true
+                        done
+
+                        echo "Waiting 30s..."
+                        sleep 30
                     """
                 }
             }
