@@ -74,3 +74,26 @@ grafana:
     limits:
       cpu: 300m
       memory: 256Mi
+
+loki:
+  enabled: true
+  image: grafana/loki:2.9.0
+  port: 3100
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+promtail:
+  enabled: true
+  image: grafana/promtail:2.9.0
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi

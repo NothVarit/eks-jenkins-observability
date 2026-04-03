@@ -19,6 +19,28 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
+  name: grafana-datasources
+  namespace: {{ .Values.namespace }}
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+    - name: Prometheus
+      type: prometheus
+      uid: PBFA97CFB590B2093
+      url: http://prometheus-svc.{{ .Values.namespace }}.svc.cluster.local:{{ .Values.prometheus.port }}
+      access: proxy
+      isDefault: true
+    - name: Loki
+      type: loki
+      uid: loki
+      url: http://loki-svc.{{ .Values.namespace }}.svc.cluster.local:3100
+      access: proxy
+      isDefault: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
   name: grafana-dashboards
   namespace: {{ .Values.namespace }}
 data:
@@ -990,6 +1012,54 @@ data:
             }
           ],
           "type": "table"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 50
+          },
+          "id": 105,
+          "title": "Pod logs (Loki)",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {
+            "h": 12,
+            "w": 24,
+            "x": 0,
+            "y": 51
+          },
+          "id": 30,
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": false,
+            "showLabels": false,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": true
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "expr": "{namespace=~\"$namespace\"}",
+              "legendFormat": "",
+              "refId": "A"
+            }
+          ],
+          "title": "Pod logs",
+          "type": "logs"
         }
       ]
     }
