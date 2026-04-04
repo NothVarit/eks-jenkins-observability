@@ -11,10 +11,12 @@ pipeline {
 
     environment {
         PATH             = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
+        KUBECONFIG       = "/Users/t.varit.srisuphanthong/.kube/config"
         AWS_REGION       = "ap-southeast-1"
         AWS_ACCOUNT_ID   = "510485988616"
         ECR_REPO         = "pod-exporter"
         CLUSTER_NAME     = "observability-cluster"
+        VPC_TAG          = "observability"
         TERRAFORM_DIR    = "${env.WORKSPACE}/terraform"
         IMAGE_NAME       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
         IMAGE_TAG        = "latest"
@@ -66,39 +68,63 @@ pipeline {
                     string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
                 ]) {
                     sh """
-                        # update kubeconfig — ถ้า cluster ไม่มีแล้วก็ข้ามไป
+                        echo "=== Step 1: Uninstall Helm releases ==="
                         aws eks update-kubeconfig \
                             --name ${CLUSTER_NAME} \
                             --region ${AWS_REGION} || true
-
-                        # ลบ helm — ถ้า cluster unreachable ก็ข้ามไป
                         helm uninstall ${HELM_RELEASE} -n ${NAMESPACE} || true
                         helm uninstall test-app -n app-dev || true
 
-                        # ลบ LB ที่ค้างผ่าน AWS CLI ตรงๆ แทน
+                        echo "=== Step 2: Delete Load Balancers ==="
                         for lb in \$(aws elb describe-load-balancers \
                             --region ${AWS_REGION} \
                             --query 'LoadBalancerDescriptions[*].LoadBalancerName' \
-                            --output text); do
+                            --output text 2>/dev/null); do
                             echo "Deleting LB: \$lb"
                             aws elb delete-load-balancer \
                                 --load-balancer-name \$lb \
                                 --region ${AWS_REGION} || true
                         done
 
-                        # ลบ sg ที่ค้าง
+                        echo "=== Step 3: Delete k8s-elb Security Groups ==="
                         for sg in \$(aws ec2 describe-security-groups \
                             --region ${AWS_REGION} \
                             --query 'SecurityGroups[?starts_with(GroupName, `k8s-elb`)].GroupId' \
-                            --output text); do
+                            --output text 2>/dev/null); do
                             echo "Deleting SG: \$sg"
                             aws ec2 delete-security-group \
                                 --group-id \$sg \
                                 --region ${AWS_REGION} || true
                         done
 
-                        echo "Waiting 30s..."
-                        sleep 30
+                        echo "=== Step 4: Delete NAT Gateways ==="
+                        for nat in \$(aws ec2 describe-nat-gateways \
+                            --region ${AWS_REGION} \
+                            --filter Name=tag:Project,Values=${VPC_TAG} \
+                            --query 'NatGateways[?State!=`deleted`].NatGatewayId' \
+                            --output text 2>/dev/null); do
+                            echo "Deleting NAT Gateway: \$nat"
+                            aws ec2 delete-nat-gateway \
+                                --nat-gateway-id \$nat \
+                                --region ${AWS_REGION} || true
+                        done
+
+                        echo "=== Step 5: Wait 60s for NAT + LB to be deleted ==="
+                        sleep 60
+
+                        echo "=== Step 6: Delete orphaned subnets ==="
+                        for subnet in \$(aws ec2 describe-subnets \
+                            --region ${AWS_REGION} \
+                            --filters Name=tag:Project,Values=${VPC_TAG} \
+                            --query 'Subnets[*].SubnetId' \
+                            --output text 2>/dev/null); do
+                            echo "Deleting subnet: \$subnet"
+                            aws ec2 delete-subnet \
+                                --subnet-id \$subnet \
+                                --region ${AWS_REGION} || true
+                        done
+
+                        echo "=== Cleanup complete ==="
                     """
                 }
             }
@@ -186,7 +212,6 @@ pipeline {
                         aws eks update-kubeconfig \
                             --name ${CLUSTER_NAME} \
                             --region ${AWS_REGION}
-
                         echo "Context: \$(kubectl config current-context)"
                         kubectl get nodes
                     """
