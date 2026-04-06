@@ -155,24 +155,33 @@ pipeline {
                     string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
                 ]) {
                     sh """
-                        cd ${TERRAFORM_DIR}
-                        terraform init
+                    cd ${TERRAFORM_DIR}
+                    terraform init
 
-                        # ถ้า subnet conflict ให้ import เข้า state แทนสร้างใหม่
-                        EXISTING=\$(aws ec2 describe-subnets \
-                            --filters "Name=cidrBlock,Values=10.0.1.0/24" \
-                                    "Name=tag:Project,Values=${VPC_TAG}" \
-                            --region ${AWS_REGION} \
-                            --query 'Subnets[0].SubnetId' \
-                            --output text 2>/dev/null)
+                    # import subnet ถ้าค้าง
+                    EXISTING_SUBNET=\$(aws ec2 describe-subnets \
+                        --filters "Name=cidrBlock,Values=10.0.1.0/24" \
+                                "Name=tag:Project,Values=${VPC_TAG}" \
+                        --region ${AWS_REGION} \
+                        --query 'Subnets[0].SubnetId' \
+                        --output text 2>/dev/null)
+                    if [ "\$EXISTING_SUBNET" != "None" ] && [ -n "\$EXISTING_SUBNET" ]; then
+                        terraform state rm 'aws_subnet.public[0]' || true
+                        terraform import 'aws_subnet.public[0]' \$EXISTING_SUBNET || true
+                    fi
 
-                        if [ "\$EXISTING" != "None" ] && [ -n "\$EXISTING" ]; then
-                            echo "Importing existing subnet: \$EXISTING"
-                            terraform import 'aws_subnet.public[0]' \$EXISTING || true
-                        fi
+                    # import EKS cluster ถ้าค้าง
+                    EXISTING_CLUSTER=\$(aws eks describe-cluster \
+                        --name ${CLUSTER_NAME} \
+                        --region ${AWS_REGION} \
+                        --query 'cluster.name' \
+                        --output text 2>/dev/null || echo "")
+                    if [ -n "\$EXISTING_CLUSTER" ]; then
+                        terraform import aws_eks_cluster.main ${CLUSTER_NAME} || true
+                    fi
 
-                        terraform apply -auto-approve
-                    """
+                    terraform apply -auto-approve
+                """
                 }
             }
         }
