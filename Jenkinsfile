@@ -38,8 +38,6 @@ pipeline {
                     echo "AWS CLI:   \$(aws --version)"
                     echo "Terraform: \$(terraform --version | head -1)"
                     echo "Action:    ${params.TERRAFORM_ACTION}"
-                    kubectl config use-context docker-desktop
-                    echo "Context: \$(kubectl config current-context)"
                 """
             }
         }
@@ -157,6 +155,18 @@ pipeline {
                     string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
                 ]) {
                     sh """
+                        echo "=== Pre-cleanup: remove orphaned subnets ==="
+                        for subnet in \$(aws ec2 describe-subnets \
+                            --region ${AWS_REGION} \
+                            --filters Name=tag:Project,Values=${VPC_TAG} \
+                            --query 'Subnets[*].SubnetId' \
+                            --output text 2>/dev/null); do
+                            echo "Deleting orphaned subnet: \$subnet"
+                            aws ec2 delete-subnet \
+                                --subnet-id \$subnet \
+                                --region ${AWS_REGION} || true
+                        done
+
                         cd ${TERRAFORM_DIR}
                         terraform init
                         terraform plan
