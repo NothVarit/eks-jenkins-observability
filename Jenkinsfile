@@ -155,21 +155,22 @@ pipeline {
                     string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
                 ]) {
                     sh """
-                        echo "=== Pre-cleanup: remove orphaned subnets ==="
-                        for subnet in \$(aws ec2 describe-subnets \
-                            --region ${AWS_REGION} \
-                            --filters Name=tag:Project,Values=${VPC_TAG} \
-                            --query 'Subnets[*].SubnetId' \
-                            --output text 2>/dev/null); do
-                            echo "Deleting orphaned subnet: \$subnet"
-                            aws ec2 delete-subnet \
-                                --subnet-id \$subnet \
-                                --region ${AWS_REGION} || true
-                        done
-
                         cd ${TERRAFORM_DIR}
                         terraform init
-                        terraform plan
+
+                        # ถ้า subnet conflict ให้ import เข้า state แทนสร้างใหม่
+                        EXISTING=\$(aws ec2 describe-subnets \
+                            --filters "Name=cidrBlock,Values=10.0.1.0/24" \
+                                    "Name=tag:Project,Values=${VPC_TAG}" \
+                            --region ${AWS_REGION} \
+                            --query 'Subnets[0].SubnetId' \
+                            --output text 2>/dev/null)
+
+                        if [ "\$EXISTING" != "None" ] && [ -n "\$EXISTING" ]; then
+                            echo "Importing existing subnet: \$EXISTING"
+                            terraform import 'aws_subnet.public[0]' \$EXISTING || true
+                        fi
+
                         terraform apply -auto-approve
                     """
                 }
