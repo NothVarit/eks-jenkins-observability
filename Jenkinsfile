@@ -38,6 +38,8 @@ pipeline {
                     echo "AWS CLI:   \$(aws --version)"
                     echo "Terraform: \$(terraform --version | head -1)"
                     echo "Action:    ${params.TERRAFORM_ACTION}"
+                    kubectl config use-context docker-desktop
+                    echo "Context: \$(kubectl config current-context)"
                 """
             }
         }
