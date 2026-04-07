@@ -86,6 +86,9 @@ pipeline {
                                 --region ${AWS_REGION} || true
                         done
 
+                        echo "=== Wait 90s for LB to be fully deleted ==="
+                        sleep 90
+
                         echo "=== Step 3: Delete k8s-elb Security Groups ==="
                         for sg in \$(aws ec2 describe-security-groups \
                             --region ${AWS_REGION} \
@@ -96,6 +99,9 @@ pipeline {
                                 --group-id \$sg \
                                 --region ${AWS_REGION} || true
                         done
+
+                        echo "=== Wait 30s after SG deletion ==="
+                        sleep 30
 
                         echo "=== Step 4: Delete NAT Gateways ==="
                         for nat in \$(aws ec2 describe-nat-gateways \
@@ -109,7 +115,7 @@ pipeline {
                                 --region ${AWS_REGION} || true
                         done
 
-                        echo "=== Step 5: Wait 60s for NAT + LB to be deleted ==="
+                        echo "=== Step 5: Wait 60s for NAT to be deleted ==="
                         sleep 60
 
                         echo "=== Step 6: Delete orphaned subnets ==="
@@ -155,33 +161,35 @@ pipeline {
                     string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
                 ]) {
                     sh """
-                    cd ${TERRAFORM_DIR}
-                    terraform init
+                        cd ${TERRAFORM_DIR}
+                        terraform init
 
-                    # import subnet ถ้าค้าง
-                    EXISTING_SUBNET=\$(aws ec2 describe-subnets \
-                        --filters "Name=cidrBlock,Values=10.0.1.0/24" \
-                                "Name=tag:Project,Values=${VPC_TAG}" \
-                        --region ${AWS_REGION} \
-                        --query 'Subnets[0].SubnetId' \
-                        --output text 2>/dev/null)
-                    if [ "\$EXISTING_SUBNET" != "None" ] && [ -n "\$EXISTING_SUBNET" ]; then
-                        terraform state rm 'aws_subnet.public[0]' || true
-                        terraform import 'aws_subnet.public[0]' \$EXISTING_SUBNET || true
-                    fi
+                        # import subnet ถ้าค้าง
+                        EXISTING_SUBNET=\$(aws ec2 describe-subnets \
+                            --filters "Name=cidrBlock,Values=10.0.1.0/24" \
+                                      "Name=tag:Project,Values=${VPC_TAG}" \
+                            --region ${AWS_REGION} \
+                            --query 'Subnets[0].SubnetId' \
+                            --output text 2>/dev/null)
+                        if [ "\$EXISTING_SUBNET" != "None" ] && [ -n "\$EXISTING_SUBNET" ]; then
+                            echo "Importing existing subnet: \$EXISTING_SUBNET"
+                            terraform state rm 'aws_subnet.public[0]' || true
+                            terraform import 'aws_subnet.public[0]' \$EXISTING_SUBNET || true
+                        fi
 
-                    # import EKS cluster ถ้าค้าง
-                    EXISTING_CLUSTER=\$(aws eks describe-cluster \
-                        --name ${CLUSTER_NAME} \
-                        --region ${AWS_REGION} \
-                        --query 'cluster.name' \
-                        --output text 2>/dev/null || echo "")
-                    if [ -n "\$EXISTING_CLUSTER" ]; then
-                        terraform import aws_eks_cluster.main ${CLUSTER_NAME} || true
-                    fi
+                        # import EKS cluster ถ้าค้าง
+                        EXISTING_CLUSTER=\$(aws eks describe-cluster \
+                            --name ${CLUSTER_NAME} \
+                            --region ${AWS_REGION} \
+                            --query 'cluster.name' \
+                            --output text 2>/dev/null || echo "")
+                        if [ -n "\$EXISTING_CLUSTER" ] && [ "\$EXISTING_CLUSTER" != "None" ]; then
+                            echo "Importing existing EKS cluster: \$EXISTING_CLUSTER"
+                            terraform import aws_eks_cluster.main ${CLUSTER_NAME} || true
+                        fi
 
-                    terraform apply -auto-approve
-                """
+                        terraform apply -auto-approve
+                    """
                 }
             }
         }

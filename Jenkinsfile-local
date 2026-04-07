@@ -2,24 +2,15 @@ pipeline {
     agent any
 
     environment {
-        PATH             = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
-
-        // ── AWS ───────────────────────────────────────────────────────────
-        AWS_REGION       = "ap-southeast-1"
-        AWS_ACCOUNT_ID   = "510485988616"
-        ECR_REPO         = "pod-exporter"
-        CLUSTER_NAME     = "observability-cluster"
-
-        // ── Image ─────────────────────────────────────────────────────────
-        IMAGE_NAME       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
-        IMAGE_TAG        = "latest"
-
-        // ── Helm ──────────────────────────────────────────────────────────
-        HELM_RELEASE     = "observability"
-        HELM_CHART       = "/Users/t.varit.srisuphanthong/Documents/mini_project/pod-exporter-chart"
-        APP_CHART        = "/Users/t.varit.srisuphanthong/Documents/mini_project/app-chart"
-        EXPORTER_DIR     = "/Users/t.varit.srisuphanthong/Documents/mini_project/exporter"
-        NAMESPACE        = "monitoring"
+        PATH          = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
+        KUBECONFIG    = "/Users/t.varit.srisuphanthong/.kube/config"
+        IMAGE_NAME    = "pod-exporter"
+        IMAGE_TAG     = "latest"
+        HELM_RELEASE  = "observability"
+        HELM_CHART    = "${env.WORKSPACE}/pod-exporter-chart"
+        APP_CHART     = "${env.WORKSPACE}/app-chart"
+        EXPORTER_DIR  = "${env.WORKSPACE}/exporter"
+        NAMESPACE     = "monitoring"
     }
 
     stages {
@@ -30,7 +21,10 @@ pipeline {
                     echo "Docker:  \$(docker --version)"
                     echo "kubectl: \$(kubectl version --client)"
                     echo "Helm:    \$(helm version --short)"
-                    echo "AWS CLI: \$(aws --version)"
+
+                    kubectl config use-context docker-desktop
+                    echo "Context: \$(kubectl config current-context)"
+                    kubectl get nodes
                 """
             }
         }
@@ -39,50 +33,9 @@ pipeline {
             steps {
                 sh """
                     cd ${EXPORTER_DIR}
-                    docker buildx build \
-                        --platform linux/amd64 \
-                        -t ${ECR_REPO}:${IMAGE_TAG} \
-                        --load \
-                        .
+                    docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                    docker images | grep ${IMAGE_NAME}
                 """
-            }
-        }
-
-        stage('Push to ECR') {
-            steps {
-                withCredentials([
-                    string(credentialsId: 'aws-access-key-id',     variable: 'AWS_ACCESS_KEY_ID'),
-                    string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
-                ]) {
-                    sh """
-                        aws ecr get-login-password --region ${AWS_REGION} | \
-                            docker login --username AWS --password-stdin \
-                            ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-
-                        docker tag ${ECR_REPO}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}
-                        docker push ${IMAGE_NAME}:${IMAGE_TAG}
-
-                        echo "Pushed: ${IMAGE_NAME}:${IMAGE_TAG}"
-                    """
-                }
-            }
-        }
-
-        stage('Connect to EKS') {
-            steps {
-                withCredentials([
-                    string(credentialsId: 'aws-access-key-id',     variable: 'AWS_ACCESS_KEY_ID'),
-                    string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
-                ]) {
-                    sh """
-                        aws eks update-kubeconfig \
-                            --name ${CLUSTER_NAME} \
-                            --region ${AWS_REGION}
-
-                        echo "Current context: \$(kubectl config current-context)"
-                        kubectl get nodes
-                    """
-                }
             }
         }
 
@@ -93,8 +46,7 @@ pipeline {
                         helm upgrade test-app ${APP_CHART} --namespace app-dev
                     else
                         helm install test-app ${APP_CHART} \
-                            --namespace app-dev \
-                            --create-namespace
+                            --namespace app-dev --create-namespace
                     fi
                 """
             }
@@ -105,9 +57,12 @@ pipeline {
                 sh """
                     echo "Linting Helm charts..."
                     helm lint ${HELM_CHART}
+
+                    echo "Dry run template render..."
                     helm template observability ${HELM_CHART} \
                         --namespace ${NAMESPACE} > /dev/null
-                    echo "Templates validated"
+
+                    echo "Templates validated successfully"
                 """
             }
         }
@@ -117,12 +72,10 @@ pipeline {
                 sh """
                     if helm status ${HELM_RELEASE} -n ${NAMESPACE} > /dev/null 2>&1; then
                         helm upgrade ${HELM_RELEASE} ${HELM_CHART} \
-                            --namespace ${NAMESPACE} \
-                            --wait --timeout 5m
+                            --namespace ${NAMESPACE} --wait --timeout 5m
                     else
                         helm install ${HELM_RELEASE} ${HELM_CHART} \
-                            --namespace ${NAMESPACE} \
-                            --create-namespace \
+                            --namespace ${NAMESPACE} --create-namespace \
                             --wait --timeout 5m
                     fi
                 """
@@ -146,8 +99,9 @@ pipeline {
 
                     echo "=== monitoring ==="
                     kubectl get pods -n ${NAMESPACE}
-                    kubectl rollout status deployment/prometheus -n ${NAMESPACE}
-                    kubectl rollout status deployment/grafana -n ${NAMESPACE}
+
+                    echo "=== Services ==="
+                    kubectl get svc -n ${NAMESPACE}
                 """
             }
         }
@@ -168,8 +122,7 @@ pipeline {
             echo "Pipeline succeeded"
             sh """
                 helm list -A
-                kubectl get pods -n ${NAMESPACE}
-                kubectl get svc -n ${NAMESPACE}
+                echo "Grafana: http://localhost:30300"
             """
         }
         failure {
