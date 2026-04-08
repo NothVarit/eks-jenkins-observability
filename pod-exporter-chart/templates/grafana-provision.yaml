@@ -1042,7 +1042,7 @@ data:
             "enableLogDetails": true,
             "prettifyLogMessage": false,
             "showCommonLabels": false,
-            "showLabels": false,
+            "showLabels": true,
             "showTime": true,
             "sortOrder": "Descending",
             "wrapLogMessage": true
@@ -1053,7 +1053,7 @@ data:
                 "type": "loki",
                 "uid": "loki"
               },
-              "expr": "{namespace=~\"$namespace\"}",
+              "expr": "{job=\"kubernetes-pods\", filename=~\"/var/log/pods/app-dev.*\"} != \"kube-probe\" | regexp \"(?P<pod_name>[^/]+/[^/]+/[^/]+)\"",
               "legendFormat": "",
               "refId": "A"
             }
