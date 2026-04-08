@@ -7,9 +7,9 @@ pipeline {
         IMAGE_NAME    = "pod-exporter"
         IMAGE_TAG     = "latest"
         HELM_RELEASE  = "observability"
-        HELM_CHART    = "${env.WORKSPACE}/pod-exporter-chart"
-        APP_CHART     = "${env.WORKSPACE}/app-chart"
-        EXPORTER_DIR  = "${env.WORKSPACE}/exporter"
+        HELM_CHART    = "/Users/t.varit.srisuphanthong/Documents/mini_project/pod-exporter-chart"
+        APP_CHART     = "/Users/t.varit.srisuphanthong/Documents/mini_project/app-chart"
+        EXPORTER_DIR  = "/Users/t.varit.srisuphanthong/Documents/mini_project/exporter"
         NAMESPACE     = "monitoring"
     }
 

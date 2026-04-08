@@ -3,8 +3,8 @@ namespace: monitoring
 # ── Custom Pod Exporter ───────────────────────────────────────────────
 customExporter:
   enabled: true
-  image: pod-exporter:latest          # ← local image
-  imagePullPolicy: IfNotPresent              # ← ไม่ pull จาก registry
+  image: 510485988616.dkr.ecr.ap-southeast-1.amazonaws.com/pod-exporter:latest
+  imagePullPolicy: Always
   port: 8000
   serviceAccount: pod-exporter-sa
   env:
@@ -29,7 +29,7 @@ customExporter:
 kubeMetrics:
   enabled: true
   image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0
-  imagePullPolicy: IfNotPresent       # ← pull ครั้งแรกแล้วใช้ cache
+  imagePullPolicy: Always           # pull แล้ว — ใช้ local
   port: 8080
   serviceAccount: kube-metrics-monitor
   resources:
@@ -66,7 +66,7 @@ grafana:
   nodePort: 30300
   prometheusUid: PBFA97CFB590B2093
   service:
-    type: NodePort                    # ← เปลี่ยนจาก LoadBalancer
+    type: LoadBalancer
   resources:
     requests:
       cpu: 100m
